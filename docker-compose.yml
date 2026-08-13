@@ -1,0 +1,36 @@
+services:
+
+  mysql:
+    image: mysql:8.4
+    container_name: employee-mysql
+
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_DATABASE: employee
+
+    ports:
+      - "3307:3306"
+
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p1234"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  employee-app:
+    build: .
+    container_name: employee-app
+
+    ports:
+      - "8081:8080"
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
