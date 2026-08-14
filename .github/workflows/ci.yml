@@ -9,6 +9,11 @@ on:
     branches:
       - main
 
+# Required for GitHub OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-and-test:
 
@@ -31,3 +36,14 @@ jobs:
 
       - name: Package application
         run: ./mvnw package -DskipTests
+
+      # Authenticate GitHub Actions with AWS IAM Role
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::062538339114:role/GitHubActionsEmployeeRole
+          aws-region: ap-south-1
+
+      # Verify that GitHub Actions successfully assumed the role
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
