@@ -8,6 +8,11 @@ on:
     branches:
       - main
 
+# Required for GitHub OIDC
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
 
   deploy:
@@ -17,35 +22,76 @@ jobs:
 
     steps:
 
+      # -----------------------------
+      # 1. Checkout code
+      # -----------------------------
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: main
 
+
+      # -----------------------------
+      # 2. Configure AWS using OIDC
+      # -----------------------------
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::062538339114:role/GitHubActionsEmployeeRole
           aws-region: ap-south-1
+
+
+      # -----------------------------
+      # 3. Verify AWS identity
+      # -----------------------------
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+
+      # -----------------------------
+      # 4. Login to ECR
+      # -----------------------------
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+
+      # -----------------------------
+      # 5. Build Docker image
+      # -----------------------------
+
       - name: Build Docker image
         run: |
           docker build -t employee-app .
+
+
+      # -----------------------------
+      # 6. Tag Docker image
+      # -----------------------------
 
       - name: Tag Docker image
         run: |
           docker tag employee-app:latest \
             ${{ steps.login-ecr.outputs.registry }}/employee-app:latest
 
+
+      # -----------------------------
+      # 7. Push image to ECR
+      # -----------------------------
+
       - name: Push Docker image to ECR
         run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/employee-app:latest
+
+
+      # -----------------------------
+      # 8. Deploy to EC2
+      # -----------------------------
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.2.2
@@ -53,18 +99,35 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+
           script: |
+
+            echo "Logging into ECR..."
+
             aws ecr get-login-password --region ap-south-1 | \
               sudo docker login \
               --username AWS \
               --password-stdin \
               062538339114.dkr.ecr.ap-south-1.amazonaws.com
 
+
+            echo "Pulling latest image..."
+
             sudo docker pull \
               062538339114.dkr.ecr.ap-south-1.amazonaws.com/employee-app:latest
 
+
+            echo "Stopping old container..."
+
             sudo docker stop employee-app || true
+
+
+            echo "Removing old container..."
+
             sudo docker rm employee-app || true
+
+
+            echo "Starting new container..."
 
             sudo docker run -d \
               --name employee-app \
@@ -72,3 +135,11 @@ jobs:
               --env-file /home/ubuntu/employee.env \
               -p 8080:8080 \
               062538339114.dkr.ecr.ap-south-1.amazonaws.com/employee-app:latest
+
+
+            echo "Deployment completed!"
+
+
+            echo "Container status:"
+
+            sudo docker ps
