@@ -1,0 +1,74 @@
+name: Employee App CD
+
+on:
+  workflow_run:
+    workflows: ["Employee App CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build -t employee-app .
+
+      - name: Tag Docker image
+        run: |
+          docker tag employee-app:latest \
+            ${{ steps.login-ecr.outputs.registry }}/employee-app:latest
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/employee-app:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            aws ecr get-login-password --region ap-south-1 | \
+              sudo docker login \
+              --username AWS \
+              --password-stdin \
+              062538339114.dkr.ecr.ap-south-1.amazonaws.com
+
+            sudo docker pull \
+              062538339114.dkr.ecr.ap-south-1.amazonaws.com/employee-app:latest
+
+            sudo docker stop employee-app || true
+            sudo docker rm employee-app || true
+
+            sudo docker run -d \
+              --name employee-app \
+              --restart unless-stopped \
+              --env-file /home/ubuntu/employee.env \
+              -p 8080:8080 \
+              062538339114.dkr.ecr.ap-south-1.amazonaws.com/employee-app:latest
